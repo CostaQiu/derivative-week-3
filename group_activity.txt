@@ -1,0 +1,137 @@
+ 
+P a g e  1 | 3 
+ 
+CASE STUDY: PORTFOLIO HEDGING WITH FUTURES 
+ 
+ 
+In the wake of significant geopolitical shifts, TQM Hedge Fund, a leading entity specializing in 
+macro strategies, finds itself navigating through a landscape fraught with increasing political and 
+trade tensions. The recent policies enacted by the new US administration, particularly the 
+imposition of tariffs on key imports, have set off a chain reaction of retaliatory measures from 
+major trading partners. These developments have profound macroeconomic implications, 
+including disrupted supply chains, fluctuating currency values, and heightened market volatility. 
+The escalation in trade conflicts has not only affected bilateral trade relationships but has also 
+introduced systemic risks that permeate global financial markets. Industries reliant on 
+international trade face uncertainties that can lead to reduced corporate earnings, stock market 
+downturns, and increased inflationary pressures. For a hedge fund like TQM, which manages 
+portfolios sensitive to global economic indicators, these macroeconomic disturbances 
+necessitate a robust hedging strategy to safeguard assets and maintain portfolio performance. 
+Recognizing the potential adverse impacts of these trade tensions on its diversified portfolios, 
+TQM's chief portfolio manager has sought the expertise of a consulting firm to devise an optimal 
+hedging policy. The objective is to mitigate the current and foreseeable risks stemming from 
+geopolitical instability and to ensure that the fund's portfolios remain resilient in the face of 
+ongoing economic uncertainties. 
+TQM oversees four distinct portfolios, each aligned with specific global indices to capture diverse 
+market segments. Below is an overview of each portfolio: 
+• 
+Portfolio 1: MSCI World Index Replication 
+o Current Value: $500,000,000 
+o Description: Comprising a diversified set of global equities, this portfolio mirrors 
+the performance of the MSCI World Index, offering broad exposure to developed 
+markets across North America, Europe, Asia, and Australia. 
+• 
+Portfolio 2: MSCI Emerging Markets Index Replication 
+o Current Value: $200,000,000 
+o Description: Focused on high-growth regions, this portfolio seeks to replicate the 
+MSCI Emerging Markets Index, encompassing stocks from developing economies 
+with significant expansion potential in Asia, Latin America, Africa, and the Middle 
+East. 
+• 
+Portfolio 3: MSCI Europe Index Replication 
+
+ 
+P a g e  2 | 3 
+ 
+CASE STUDY: PORTFOLIO HEDGING WITH FUTURES 
+o Current Value: $175,000,000 
+o Description: Concentrated on European equities, this portfolio tracks the MSCI 
+Europe Index, providing exposure to companies across various European 
+countries, including those directly impacted by trade policies between the US and 
+Europe. 
+• 
+Portfolio 4: MSCI Pacific Index Replication 
+o Current Value: $160,000,000 
+o Description: Targeting the Asia-Pacific region, this portfolio mirrors the MSCI 
+Pacific Index, including major economies like Japan, Australia, South Korea, and 
+others in the Pacific Rim, which are at the forefront of retaliatory trade measures. 
+Amidst the backdrop of rising tariffs and retaliatory trade measures, the chief portfolio 
+manager of TQM is concerned about the potential market volatility and its adverse effects on 
+the fund's portfolios. The primary objective of engaging the consulting firm is to: 
+• 
+Assess Current Risk Exposure: Understand how geopolitical tensions are influencing the 
+performance and risk profiles of each portfolio. 
+• 
+Develop an Effective Hedging Strategy: Implement hedging mechanisms that can 
+protect portfolio values against anticipated market downturns and volatility resulting 
+from trade conflicts. 
+• 
+Optimize Hedge Efficiency: Ensure that the hedging policies balance risk mitigation with 
+cost-effectiveness, avoiding over-hedging that could erode potential returns. 
+To achieve the hedging objectives, the consulting firm has identified the use of futures 
+contracts on major indices that correlate with TQM's portfolios. The available futures 
+instruments and their specifications are as follows: 
+Futures Contract 
+Underlying Index 
+Contract 
+Size 
+Current Futures 
+Value 
+CME-MINI S&P 500 
+INDEX 
+S&P 500 Index 
+50 
+4,500 
+CME-E MINI FTSE EMER 
+INDEX 
+FTSE Emerging 
+Markets Index 
+100 
+1,200 
+CME-EMINI FTSE CHINA 
+50 INDEX 
+FTSE China 50 Index 
+2 
+3,800 
+CME-NIKKEI 225 INDEX 
+Nikkei 225 Index 
+5 
+22,000 
+ 
+
+ 
+P a g e  3 | 3 
+ 
+CASE STUDY: PORTFOLIO HEDGING WITH FUTURES 
+Use the following analyses to provide a recommendation about the best hedging policy for the 
+company. 
+A. The first type of policy would be to hedge the portfolios individually. The bank is exploring 
+combinations of the following contracts: e-mini S&P 500 futures, Nikkei 225 USD futures, 
+e-mini FTSE emerging index futures, and e-mini FTSE China 50 Index Futures.  
+a) For each portfolio, compute the correlation between its returns and those of each 
+futures. Employ one-week returns in your calculations. To compute portfolio returns, 
+use 
+the 
+time-series 
+of 
+the 
+indexes 
+provided 
+in 
+the 
+file 
+“Hedging_PortfolioValue_21.xls” (spread sheet “Indexes”). For instance, the weekly 
+returns of Portfolio 1 should be computed from the MSCI global index prices. For 
+futures returns, their historical prices are in the same file (spread sheet “Futures” 
+contains weekly observations for the continuous contract). In addition, estimate the 
+volatility of each portfolio and the correlation matrix between the portfolios’ returns. 
+Estimate the overall portfolio’s volatility using the correlation matrix, the individual 
+portfolio volatilities, and the relative weights of each portfolio (annualize the overall 
+portfolio’s volatility by multiplying the weakly estimate by sqrt(52) ).  
+b) Use the following regression model to determine the optimal hedging ratio: 
+𝐼𝑡= 𝛼+ 𝛽𝐹𝑡+ 𝜀𝑡. 
+In the above equation, I is the one-week return of a given portfolio, F is the one-week 
+return of the e-mini S&P 500 futures contract, and the last term is the error term in 
+the regression. How many contracts are required to hedge each portfolio? Provide a 
+table in which you give the parameters of each regression (intercept, slope, R^2, t-
+stat for the slope parameter). 
+ 

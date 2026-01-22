@@ -1,0 +1,5 @@
+Strategy,Num_Futures,Contract_Value,Notes
+Single-Future (4 portfolios),4,$934M,"Simple, 1 future per portfolio"
+Multi-Future (Handpicked),6,$969M,World/EM: single; Europe/Pacific: 2-factor
+Firm-Wide 4-Factor,4,$1053M,"Adj R²=92.61%, includes insig. China50"
+Firm-Wide 3-Factor,3,$1023M,"Adj R²=92.65%, RECOMMENDED"
