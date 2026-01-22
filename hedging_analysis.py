@@ -820,7 +820,37 @@ def run_firmwide_regression_no_china(returns_df):
     return results
 
 
-def calculate_all_contracts(single_reg_df, multi_results, firmwide_4f, firmwide_3f, df):
+def run_firmwide_regression_sp_nikkei(returns_df):
+    """Run regression of firm-wide return on 2 futures (S&P 500 + Nikkei only)."""
+    print("\n--- Firm-Wide 2-Factor (S&P 500 + Nikkei Only) ---")
+    
+    two_futures = ['SP500_fut_ret', 'NIKKEI_fut_ret']
+    
+    y = returns_df['FIRMWIDE_ret'].values
+    X = returns_df[two_futures].values
+    X_with_const = sm.add_constant(X)
+    
+    model = sm.OLS(y, X_with_const).fit()
+    
+    print(f"2-Factor Model (SP500, NIKKEI):")
+    print(f"Adj R²: {model.rsquared_adj:.4f}")
+    
+    results = {'intercept': model.params[0], 'r_squared': model.rsquared, 'adj_r_squared': model.rsquared_adj}
+    
+    for i, fut in enumerate(two_futures):
+        beta = model.params[i + 1]
+        t_stat = model.tvalues[i + 1]
+        p_val = model.pvalues[i + 1]
+        fut_name = fut.replace('_fut_ret', '')
+        sig = '***' if p_val < 0.01 else ('**' if p_val < 0.05 else ('*' if p_val < 0.1 else ''))
+        print(f"  {fut_name}: β={beta:.4f}, t={t_stat:.2f}, p={p_val:.4f} {sig}")
+        results[fut_name] = {'beta': beta, 't_stat': t_stat, 'p_value': p_val}
+    
+    results['model'] = model
+    return results
+
+
+def calculate_all_contracts(single_reg_df, multi_results, firmwide_4f, firmwide_3f, firmwide_2f, df):
     """Calculate contracts for all hedge strategies."""
     print("\n" + "=" * 70)
     print("CONTRACT CALCULATIONS - ALL STRATEGIES")
@@ -935,6 +965,31 @@ def calculate_all_contracts(single_reg_df, multi_results, firmwide_4f, firmwide_
             print(f"  {fut_key}: {N_rounded} contracts (${contract_value/1e6:.1f}M)")
     print(f"  TOTAL Contract Value: ${fw3_total_value/1e6:.1f}M")
     
+    # Firm-wide 2-factor contracts (SP500 + NIKKEI only)
+    print("\n--- Firm-Wide 2-Factor (SP500 + NIKKEI Only) ---")
+    fw2_total_value = 0
+    for fut_key in ['SP500', 'NIKKEI']:
+        if fut_key in firmwide_2f:
+            beta = firmwide_2f[fut_key]['beta']
+            futures_price = futures_prices[fut_key]
+            multiplier = CONTRACT_SPECS[fut_key]['multiplier']
+            V_F = futures_price * multiplier
+            N_star = beta * (TOTAL_PORTFOLIO / V_F)
+            N_rounded = round(N_star)
+            contract_value = abs(N_rounded) * V_F
+            fw2_total_value += contract_value
+            
+            all_contracts.append({
+                'Strategy': 'Firm-Wide-2F',
+                'Portfolio': 'Firm-Wide',
+                'Future': fut_key,
+                'h*': beta,
+                'Contracts': N_rounded,
+                'Contract_Value': contract_value
+            })
+            print(f"  {fut_key}: {N_rounded} contracts (${contract_value/1e6:.1f}M)")
+    print(f"  TOTAL Contract Value: ${fw2_total_value/1e6:.1f}M")
+    
     contracts_df = pd.DataFrame(all_contracts)
     csv_path = OUTPUT_DIR / 'all_contracts.csv'
     contracts_df.to_csv(csv_path, index=False)
@@ -944,11 +999,12 @@ def calculate_all_contracts(single_reg_df, multi_results, firmwide_4f, firmwide_
         'single': single_total_value,
         'multi': multi_total_value,
         'firmwide_4f': fw4_total_value,
-        'firmwide_3f': fw3_total_value
+        'firmwide_3f': fw3_total_value,
+        'firmwide_2f': fw2_total_value
     }
 
 
-def create_comparison_summary(single_reg_df, multi_results, firmwide_4f, firmwide_3f, total_values):
+def create_comparison_summary(single_reg_df, multi_results, firmwide_4f, firmwide_3f, firmwide_2f, total_values):
     """Create comparison summary table for all strategies."""
     print("\nCreating strategy comparison summary...")
     
@@ -974,9 +1030,13 @@ def create_comparison_summary(single_reg_df, multi_results, firmwide_4f, firmwid
          "3",
          f"${total_values['firmwide_3f']/1e6:.0f}M",
          f"Adj R²={firmwide_3f['adj_r_squared']:.2%}, RECOMMENDED"],
+        ['Firm-Wide 2-Factor (SP500+NIKKEI)', 
+         "2",
+         f"${total_values['firmwide_2f']/1e6:.0f}M",
+         f"Adj R²={firmwide_2f['adj_r_squared']:.2%}, Simplest"],
     ]
     
-    fig, ax = plt.subplots(figsize=(14, 5))
+    fig, ax = plt.subplots(figsize=(14, 6))
     ax.axis('off')
     
     table = ax.table(cellText=summary_data,
@@ -992,11 +1052,15 @@ def create_comparison_summary(single_reg_df, multi_results, firmwide_4f, firmwid
         table[(0, i)].set_facecolor('#4472C4')
         table[(0, i)].set_text_props(color='white', fontweight='bold')
     
-    # Highlight recommended strategy
+    # Highlight recommended strategy (3-Factor)
     for j in range(4):
         table[(4, j)].set_facecolor('#C6EFCE')
     
-    plt.title('Strategy Comparison: Fewer Futures = Lower Management Cost\n(Green = Recommended)', 
+    # Highlight 2-Factor row (light blue for comparison)
+    for j in range(4):
+        table[(5, j)].set_facecolor('#BDD7EE')
+    
+    plt.title('Strategy Comparison: Fewer Futures = Lower Management Cost\n(Green = Recommended, Blue = 2-Factor Comparison)', 
               fontsize=12, fontweight='bold', pad=20)
     
     filepath = OUTPUT_DIR / '09_strategy_comparison.png'
@@ -1066,6 +1130,65 @@ def plot_firmwide_summary(firmwide_3f, contracts_df):
     print(f"  Saved: {filepath}")
 
 
+def plot_firmwide_comparison(firmwide_4f, firmwide_3f, firmwide_2f, total_values):
+    """Create bar chart comparing firm-wide hedging strategies (2F vs 3F vs 4F)."""
+    print("Creating firm-wide comparison chart (2F vs 3F vs 4F)...")
+    
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    strategies = ['4-Factor\n(incl. China50)', '3-Factor\n(Recommended)', '2-Factor\n(SP500+NIKKEI)']
+    colors = ['#A5A5A5', '#70AD47', '#5B9BD5']  # Gray, Green, Blue
+    
+    # Adj R² comparison
+    ax1 = axes[0]
+    adj_r2_values = [
+        firmwide_4f['adj_r_squared'] * 100,
+        firmwide_3f['adj_r_squared'] * 100,
+        firmwide_2f['adj_r_squared'] * 100
+    ]
+    bars1 = ax1.bar(strategies, adj_r2_values, color=colors, edgecolor='black')
+    ax1.set_ylabel('Adjusted R² (%)')
+    ax1.set_title('Hedge Effectiveness', fontweight='bold')
+    ax1.set_ylim(85, 100)
+    for bar, val in zip(bars1, adj_r2_values):
+        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.3,
+                f'{val:.2f}%', ha='center', va='bottom', fontweight='bold', fontsize=10)
+    
+    # Number of Futures
+    ax2 = axes[1]
+    n_futures = [4, 3, 2]
+    bars2 = ax2.bar(strategies, n_futures, color=colors, edgecolor='black')
+    ax2.set_ylabel('Number of Futures')
+    ax2.set_title('Management Complexity', fontweight='bold')
+    ax2.set_ylim(0, 5)
+    for bar, val in zip(bars2, n_futures):
+        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.1,
+                f'{val}', ha='center', va='bottom', fontweight='bold', fontsize=12)
+    
+    # Contract Value
+    ax3 = axes[2]
+    contract_values = [
+        total_values['firmwide_4f'] / 1e6,
+        total_values['firmwide_3f'] / 1e6,
+        total_values['firmwide_2f'] / 1e6
+    ]
+    bars3 = ax3.bar(strategies, contract_values, color=colors, edgecolor='black')
+    ax3.set_ylabel('Total Contract Value ($M)')
+    ax3.set_title('Total Contract Value (Notional)', fontweight='bold')
+    for bar, val in zip(bars3, contract_values):
+        ax3.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 10,
+                f'${val:.0f}M', ha='center', va='bottom', fontweight='bold', fontsize=10)
+    
+    fig.suptitle('Firm-Wide Hedging Strategy Comparison: 2-Factor vs 3-Factor vs 4-Factor', 
+                 fontsize=14, fontweight='bold', y=1.02)
+    
+    plt.tight_layout()
+    filepath = OUTPUT_DIR / '08_firmwide_2factor_comparison.png'
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"  Saved: {filepath}")
+
+
 # =============================================================================
 # Main Execution
 # =============================================================================
@@ -1127,12 +1250,13 @@ def main():
     returns_df = calculate_firmwide_return(returns_df)
     firmwide_4f = run_firmwide_regression(returns_df)
     firmwide_3f = run_firmwide_regression_no_china(returns_df)
+    firmwide_2f = run_firmwide_regression_sp_nikkei(returns_df)
     
     # =========================================================================
     # PART 5: CONTRACT CALCULATIONS & COMPARISON
     # =========================================================================
     all_contracts_df, total_values = calculate_all_contracts(
-        single_reg_df, multi_results, firmwide_4f, firmwide_3f, df)
+        single_reg_df, multi_results, firmwide_4f, firmwide_3f, firmwide_2f, df)
     
     # =========================================================================
     # PART 6: VISUALIZATIONS & SUMMARY
@@ -1141,8 +1265,9 @@ def main():
     print("CREATING SUMMARY VISUALIZATIONS")
     print("=" * 70)
     
-    comparison_df = create_comparison_summary(single_reg_df, multi_results, firmwide_4f, firmwide_3f, total_values)
+    comparison_df = create_comparison_summary(single_reg_df, multi_results, firmwide_4f, firmwide_3f, firmwide_2f, total_values)
     plot_firmwide_summary(firmwide_3f, all_contracts_df)
+    plot_firmwide_comparison(firmwide_4f, firmwide_3f, firmwide_2f, total_values)
     
     # =========================================================================
     # FINAL SUMMARY
@@ -1170,6 +1295,13 @@ def main():
     print("   Pros: Diversification, simplicity, lower margin")
     print("   Cons: Less tailored to individual portfolios")
     
+    print("\n4. FIRM-WIDE 2-FACTOR HEDGING (SP500 + NIKKEI ONLY):")
+    print(f"   Adj R²: {firmwide_2f['adj_r_squared']:.4f}")
+    print(f"   Total Contract Value: ${total_values['firmwide_2f']/1e6:.0f}M")
+    print("   Contracts: SP500, NIKKEI (2 positions)")
+    print("   Pros: Simplest management, lowest complexity")
+    print("   Cons: Lower R² than 3-factor, excludes EM exposure")
+    
     print(f"\nAll visualizations saved to: {OUTPUT_DIR}")
     
     return {
@@ -1180,6 +1312,7 @@ def main():
         'multi_results': multi_results,
         'firmwide_4f': firmwide_4f,
         'firmwide_3f': firmwide_3f,
+        'firmwide_2f': firmwide_2f,
         'all_contracts_df': all_contracts_df,
         'total_values': total_values
     }

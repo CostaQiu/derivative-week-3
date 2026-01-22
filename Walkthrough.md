@@ -46,24 +46,22 @@ The black box highlights the key cross-correlations between futures (rows) and i
 ### Formula
 The optimal number of futures contracts is:
 
-```
-N* = h* × (V_S / V_F)
-```
+**N\* = h\* × (Vₛ / Vᶠ)**
 
 Where:
-- **N*** = Optimal number of contracts
-- **h*** = Hedge ratio (beta from regression)
-- **V_S** = Value of spot position (portfolio value)
-- **V_F** = Value of one futures contract = Futures Price × Multiplier
+- **N\*** = Optimal number of contracts
+- **h\*** = Hedge ratio (beta from regression)
+- **Vₛ** = Value of spot position (portfolio value)
+- **Vᶠ** = Value of one futures contract = Futures Price × Multiplier
 
 ### Contract Specifications
 
-| Future   | Multiplier | Price      | Contract Value ($V_F$) |
-| -------- | ---------- | ---------- | ---------------------- |
-| S&P 500  | 50         | $4,202.50  | $210,125               |
-| FTSE EM  | 100        | $668.30    | $66,830                |
-| China 50 | 2          | $20,487.50 | $40,975                |
-| Nikkei   | 5          | $29,020.00 | $145,100               |
+| Future   | Multiplier | Price      | Contract Value (Vᶠ) |
+| -------- | ---------- | ---------- | ------------------- |
+| S&P 500  | 50         | $4,202.50  | $210,125            |
+| FTSE EM  | 100        | $668.30    | $66,830             |
+| China 50 | 2          | $20,487.50 | $40,975             |
+| Nikkei   | 5          | $29,020.00 | $145,100            |
 
 ---
 
@@ -229,20 +227,40 @@ N*(FTSE_EM) = 0.2996 × (1,035,000,000 / 66,830)  = 4,640 contracts
 N*(NIKKEI)  = 0.2305 × (1,035,000,000 / 145,100) = 1,644 contracts
 ```
 
+### 7.3 2-Factor Model (S&P 500 + Nikkei Only)
+
+For comparison, we also evaluate a simpler 2-factor model using only S&P 500 and Nikkei futures:
+
+![Firm-Wide Comparison](visualizations/08_firmwide_2factor_comparison.png)
+
+| Future    | β (h*) | t-stat | Contracts | Value     |
+| --------- | ------ | ------ | --------- | --------- |
+| SP500     | 0.5937 | ***    | 2,924     | $614M     |
+| NIKKEI    | 0.3244 | ***    | 2,314     | $336M     |
+| **TOTAL** |        |        | **5,238** | **$950M** |
+
+**Adj R² = 88.75%**
+
+**Trade-off Analysis:**
+- 2-Factor loses ~4pp Adj R² but requires only 2 futures vs 3
+- 2-Factor contract value is ~$73M lower
+- 2-Factor excludes emerging market exposure (FTSE_EM)
+
 ---
 
 ## 8. Strategy Comparison
 
 ![Strategy Comparison](visualizations/09_strategy_comparison.png)
 
-| Strategy         | # Futures | Contracts | Value       | Notes             |
-| ---------------- | --------- | --------- | ----------- | ----------------- |
-| Single-Future    | 4         | 6,613     | $934M       | 1 per portfolio   |
-| Multi-Future     | 6         | 7,387     | $969M       | Handpicked        |
-| Firm-Wide 4F     | 4         | ~10,377   | $1,053M     | Includes China50  |
-| **Firm-Wide 3F** | **3**     | **8,540** | **$1,023M** | **Adj R²=92.65%** |
+| Strategy                    | # Futures | Contracts | Value       | Notes             |
+| --------------------------- | --------- | --------- | ----------- | ----------------- |
+| Single-Future               | 4         | 6,613     | $934M       | 1 per portfolio   |
+| Multi-Future                | 6         | 7,387     | $969M       | Handpicked        |
+| Firm-Wide 4F                | 4         | ~10,377   | $1,053M     | Includes China50  |
+| **Firm-Wide 3F**            | **3**     | **8,540** | **$1,023M** | **Adj R²=92.65%** |
+| Firm-Wide 2F (SP500+NIKKEI) | 2         | 5,238     | $950M       | Adj R²=88.75%     |
 
-> **Key Insight**: Firm-Wide 3-Factor achieves the highest Adj R² (92.65%) with fewest futures (3).
+> **Key Insight**: Firm-Wide 3-Factor achieves the highest Adj R² (92.65%) with only 3 futures. The 2-Factor (SP500+NIKKEI) offers simplicity at a modest R² cost.
 
 ---
 
