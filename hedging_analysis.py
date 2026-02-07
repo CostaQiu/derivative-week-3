@@ -1190,6 +1190,441 @@ def plot_firmwide_comparison(firmwide_4f, firmwide_3f, firmwide_2f, total_values
 
 
 # =============================================================================
+# PART 7: MARGIN ANALYSIS
+# =============================================================================
+
+# Margin parameters
+OPENING_MARGIN_PCT = 0.15   # 15% opening margin requirement
+MAINT_MARGIN_PCT = 0.10     # 10% maintenance margin requirement
+
+
+def calculate_margin_analysis(returns_df, all_contracts_df, df, total_values):
+    """
+    Calculate margin requirements for all strategies:
+    - Opening margin (15% of notional)
+    - Maintenance margin (10% of notional)
+    - Potential margin calls for 1, 2, 3 std unfavorable moves at individual index level
+    - Firm-wide diversification benefit from correlation
+    """
+    print("\n" + "=" * 70)
+    print("PART 7: MARGIN ANALYSIS")
+    print("=" * 70)
+    print(f"Opening Margin: {OPENING_MARGIN_PCT:.0%} of notional contract value")
+    print(f"Maintenance Margin: {MAINT_MARGIN_PCT:.0%} of notional contract value")
+
+    latest = df.iloc[-1]
+    futures_prices = {
+        'SP500': latest['CME-MINI S&P 500 INDEX CONT. - SETT. PRICE'],
+        'FTSE_EM': latest['CME-E MINI FTSE EMER INDEX CONT - SETT. PRICE'],
+        'CHINA50': latest['CME-EMINI FTSE CHINA 50 CONT - SETT. PRICE'],
+        'NIKKEI': latest['CME-NIKKEI 225 INDEX COMP. CONTINUOUS - SETT. PRICE']
+    }
+
+    # Weekly std dev of each futures return
+    futures_std = {
+        'SP500': returns_df['SP500_fut_ret'].std(),
+        'FTSE_EM': returns_df['FTSE_EM_fut_ret'].std(),
+        'CHINA50': returns_df['CHINA50_fut_ret'].std(),
+        'NIKKEI': returns_df['NIKKEI_fut_ret'].std()
+    }
+
+    # Correlation matrix of futures returns (for diversification benefit)
+    fut_ret_cols = ['SP500_fut_ret', 'FTSE_EM_fut_ret', 'CHINA50_fut_ret', 'NIKKEI_fut_ret']
+    fut_corr_matrix = returns_df[fut_ret_cols].corr()
+
+    print(f"\nWeekly Futures Return Std Deviations:")
+    for k, v in futures_std.items():
+        print(f"  {k}: {v*100:.2f}%")
+
+    # -------------------------------------------------------------------------
+    # Calculate margins for each strategy
+    # -------------------------------------------------------------------------
+    strategies = ['Single-Future', 'Multi-Future', 'Firm-Wide-4F', 'Firm-Wide-3F', 'Firm-Wide-2F']
+    strategy_labels = ['Single-Future', 'Multi-Future', 'Firm-Wide 4F', 'Firm-Wide 3F', 'Firm-Wide 2F']
+
+    margin_results = []
+
+    for strat, strat_label in zip(strategies, strategy_labels):
+        strat_contracts = all_contracts_df[all_contracts_df['Strategy'] == strat]
+        if strat_contracts.empty:
+            continue
+
+        print(f"\n--- {strat_label} ---")
+
+        # Group by portfolio (for single/multi) or firm-wide
+        if strat in ['Single-Future', 'Multi-Future']:
+            portfolios = strat_contracts['Portfolio'].unique()
+        else:
+            portfolios = ['Firm-Wide']
+
+        strat_total_opening = 0
+        strat_total_maint = 0
+        strat_individual_stress = {1: 0, 2: 0, 3: 0}  # sum of individual stresses
+        strat_diversified_stress = {1: 0, 2: 0, 3: 0}  # with correlation benefit
+
+        for portfolio in portfolios:
+            port_contracts = strat_contracts[strat_contracts['Portfolio'] == portfolio]
+
+            # Notional value for this portfolio's positions
+            port_notional = port_contracts['Contract_Value'].sum()
+            port_opening = port_notional * OPENING_MARGIN_PCT
+            port_maint = port_notional * MAINT_MARGIN_PCT
+
+            strat_total_opening += port_opening
+            strat_total_maint += port_maint
+
+            # Calculate individual stress P&L for each futures position
+            # Unfavorable = futures price moves against the short hedge (price goes UP)
+            # Loss per contract = num_contracts * multiplier * (price_change)
+            # price_change for n-std = futures_price * n * weekly_std
+
+            position_losses = {}  # {future_key: {1: loss, 2: loss, 3: loss}}
+            position_notionals = {}
+
+            for _, row in port_contracts.iterrows():
+                fut_key = row['Future']
+                n_contracts = abs(row['Contracts'])
+                multiplier = CONTRACT_SPECS[fut_key]['multiplier']
+                fut_price = futures_prices[fut_key]
+                sigma = futures_std[fut_key]
+                notional = n_contracts * fut_price * multiplier
+
+                position_notionals[fut_key] = notional
+
+                losses = {}
+                for n_std in [1, 2, 3]:
+                    # Unfavorable move: futures price increases by n * sigma
+                    price_move = fut_price * n_std * sigma
+                    loss = n_contracts * multiplier * price_move
+                    losses[n_std] = loss
+                    strat_individual_stress[n_std] += loss
+
+                position_losses[fut_key] = losses
+
+            # Diversified stress: use correlation to compute combined loss
+            # Combined std of portfolio P&L = sqrt(w' * Cov * w)
+            # where w_i = N_i * multiplier_i * F_i * sigma_i (dollar std per position)
+            fut_keys_in_port = list(position_losses.keys())
+            if len(fut_keys_in_port) > 1:
+                # Dollar volatilities for each position
+                dollar_vols = []
+                for fk in fut_keys_in_port:
+                    n_contracts = abs(port_contracts[port_contracts['Future'] == fk]['Contracts'].values[0])
+                    multiplier = CONTRACT_SPECS[fk]['multiplier']
+                    fut_price = futures_prices[fk]
+                    sigma = futures_std[fk]
+                    dv = n_contracts * multiplier * fut_price * sigma
+                    dollar_vols.append(dv)
+
+                dollar_vols = np.array(dollar_vols)
+
+                # Build sub-correlation matrix for these futures
+                fut_ret_map = {
+                    'SP500': 'SP500_fut_ret', 'FTSE_EM': 'FTSE_EM_fut_ret',
+                    'CHINA50': 'CHINA50_fut_ret', 'NIKKEI': 'NIKKEI_fut_ret'
+                }
+                sub_cols = [fut_ret_map[fk] for fk in fut_keys_in_port]
+                sub_corr = returns_df[sub_cols].corr().values
+
+                # Combined dollar volatility: sqrt(dv' * corr * dv)
+                combined_var = dollar_vols @ sub_corr @ dollar_vols
+                combined_std = np.sqrt(combined_var)
+
+                for n_std in [1, 2, 3]:
+                    diversified_loss = n_std * combined_std
+                    strat_diversified_stress[n_std] += diversified_loss
+            else:
+                # Single future - no diversification benefit
+                for n_std in [1, 2, 3]:
+                    strat_diversified_stress[n_std] += position_losses[fut_keys_in_port[0]][n_std]
+
+            # Print per-portfolio details
+            if strat in ['Single-Future', 'Multi-Future']:
+                print(f"  {portfolio}:")
+                print(f"    Notional: ${port_notional/1e6:.1f}M | Opening Margin: ${port_opening/1e6:.1f}M | Maint Margin: ${port_maint/1e6:.1f}M")
+                for fut_key, losses in position_losses.items():
+                    print(f"    {fut_key}: 1σ=${losses[1]/1e6:.1f}M, 2σ=${losses[2]/1e6:.1f}M, 3σ=${losses[3]/1e6:.1f}M")
+
+        # Print strategy totals
+        print(f"\n  TOTAL Opening Margin: ${strat_total_opening/1e6:.1f}M")
+        print(f"  TOTAL Maintenance Margin: ${strat_total_maint/1e6:.1f}M")
+        print(f"  Stress Loss (individual sum): 1σ=${strat_individual_stress[1]/1e6:.1f}M, "
+              f"2σ=${strat_individual_stress[2]/1e6:.1f}M, 3σ=${strat_individual_stress[3]/1e6:.1f}M")
+        print(f"  Stress Loss (diversified):    1σ=${strat_diversified_stress[1]/1e6:.1f}M, "
+              f"2σ=${strat_diversified_stress[2]/1e6:.1f}M, 3σ=${strat_diversified_stress[3]/1e6:.1f}M")
+
+        if strat_individual_stress[1] > 0:
+            benefit_pct = (1 - strat_diversified_stress[1] / strat_individual_stress[1]) * 100
+            print(f"  Diversification Benefit: {benefit_pct:.1f}% reduction in stress margin")
+        else:
+            benefit_pct = 0.0
+
+        # Potential margin call = stress loss - (opening margin - maintenance margin)
+        # i.e., if loss exceeds the cushion between opening and maintenance
+        cushion = strat_total_opening - strat_total_maint
+        print(f"  Margin Cushion (Opening - Maintenance): ${cushion/1e6:.1f}M")
+
+        for n_std in [1, 2, 3]:
+            div_loss = strat_diversified_stress[n_std]
+            margin_call = max(0, div_loss - cushion)
+            if margin_call > 0:
+                print(f"  {n_std}σ Margin Call (diversified): ${margin_call/1e6:.1f}M")
+            else:
+                print(f"  {n_std}σ Margin Call (diversified): None (loss within cushion)")
+
+        margin_results.append({
+            'Strategy': strat_label,
+            'Notional': total_values.get(strat.lower().replace('-', '_').replace('firm_wide_', 'firmwide_').replace('single_future', 'single').replace('multi_future', 'multi'), 0),
+            'Opening_Margin': strat_total_opening,
+            'Maintenance_Margin': strat_total_maint,
+            'Cushion': cushion,
+            'Stress_1std_Individual': strat_individual_stress[1],
+            'Stress_2std_Individual': strat_individual_stress[2],
+            'Stress_3std_Individual': strat_individual_stress[3],
+            'Stress_1std_Diversified': strat_diversified_stress[1],
+            'Stress_2std_Diversified': strat_diversified_stress[2],
+            'Stress_3std_Diversified': strat_diversified_stress[3],
+            'Diversification_Benefit_Pct': benefit_pct,
+            'Margin_Call_1std': max(0, strat_diversified_stress[1] - cushion),
+            'Margin_Call_2std': max(0, strat_diversified_stress[2] - cushion),
+            'Margin_Call_3std': max(0, strat_diversified_stress[3] - cushion),
+        })
+
+    margin_df = pd.DataFrame(margin_results)
+
+    # Fix notional values using total_values dict
+    notional_map = {
+        'Single-Future': total_values['single'],
+        'Multi-Future': total_values['multi'],
+        'Firm-Wide 4F': total_values['firmwide_4f'],
+        'Firm-Wide 3F': total_values['firmwide_3f'],
+        'Firm-Wide 2F': total_values['firmwide_2f'],
+    }
+    margin_df['Notional'] = margin_df['Strategy'].map(notional_map)
+
+    csv_path = OUTPUT_DIR / 'margin_analysis.csv'
+    margin_df.to_csv(csv_path, index=False)
+    print(f"\nSaved: {csv_path}")
+
+    return margin_df
+
+
+def plot_margin_overview(margin_df):
+    """Create visualization comparing opening/maintenance margins across strategies."""
+    print("Creating margin overview visualization...")
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+    strategies = margin_df['Strategy'].values
+    x = np.arange(len(strategies))
+    width = 0.35
+
+    # Chart 1: Opening vs Maintenance Margin
+    ax1 = axes[0]
+    bars1 = ax1.bar(x - width/2, margin_df['Opening_Margin'] / 1e6, width,
+                    label='Opening Margin (15%)', color='#4472C4', edgecolor='black')
+    bars2 = ax1.bar(x + width/2, margin_df['Maintenance_Margin'] / 1e6, width,
+                    label='Maintenance Margin (10%)', color='#ED7D31', edgecolor='black')
+
+    ax1.set_ylabel('Margin ($M)')
+    ax1.set_title('Opening vs Maintenance Margin by Strategy', fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(strategies, rotation=15, ha='right', fontsize=9)
+    ax1.legend(fontsize=9)
+
+    for bar in bars1:
+        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 1,
+                f'${bar.get_height():.0f}M', ha='center', va='bottom', fontsize=8, fontweight='bold')
+    for bar in bars2:
+        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 1,
+                f'${bar.get_height():.0f}M', ha='center', va='bottom', fontsize=8, fontweight='bold')
+
+    # Chart 2: Margin as % of portfolio
+    ax2 = axes[1]
+    total_portfolio = 1_035_000_000
+    opening_pct = margin_df['Opening_Margin'] / total_portfolio * 100
+    maint_pct = margin_df['Maintenance_Margin'] / total_portfolio * 100
+
+    bars3 = ax2.bar(x - width/2, opening_pct, width,
+                    label='Opening Margin', color='#4472C4', edgecolor='black')
+    bars4 = ax2.bar(x + width/2, maint_pct, width,
+                    label='Maintenance Margin', color='#ED7D31', edgecolor='black')
+
+    ax2.set_ylabel('Margin as % of Portfolio ($1.035B)')
+    ax2.set_title('Margin Requirements Relative to Portfolio', fontweight='bold')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(strategies, rotation=15, ha='right', fontsize=9)
+    ax2.legend(fontsize=9)
+
+    for bar in bars3:
+        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.1,
+                f'{bar.get_height():.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
+
+    fig.suptitle('Margin Requirements Comparison', fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    filepath = OUTPUT_DIR / '10_margin_overview.png'
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"  Saved: {filepath}")
+
+
+def plot_stress_margin_comparison(margin_df):
+    """Create visualization comparing individual vs diversified stress margins."""
+    print("Creating stress margin comparison visualization...")
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    strategies = margin_df['Strategy'].values
+    x = np.arange(len(strategies))
+    width = 0.35
+
+    for idx, n_std in enumerate([1, 2, 3]):
+        ax = axes[idx]
+        individual = margin_df[f'Stress_{n_std}std_Individual'] / 1e6
+        diversified = margin_df[f'Stress_{n_std}std_Diversified'] / 1e6
+
+        bars1 = ax.bar(x - width/2, individual, width,
+                       label='Individual (Sum)', color='#C00000', edgecolor='black', alpha=0.8)
+        bars2 = ax.bar(x + width/2, diversified, width,
+                       label='Diversified (Corr.)', color='#70AD47', edgecolor='black', alpha=0.8)
+
+        # Add cushion line
+        cushion = margin_df['Cushion'] / 1e6
+        ax.plot(x, cushion, 'k--', linewidth=2, label='Margin Cushion', marker='D', markersize=6)
+
+        ax.set_ylabel('Potential Loss ($M)')
+        ax.set_title(f'{n_std}σ Unfavorable Move', fontweight='bold', fontsize=12)
+        ax.set_xticks(x)
+        ax.set_xticklabels(strategies, rotation=15, ha='right', fontsize=8)
+        ax.legend(fontsize=8, loc='upper left')
+
+        for bar in bars1:
+            ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
+                    f'${bar.get_height():.0f}M', ha='center', va='bottom', fontsize=7, fontweight='bold')
+        for bar in bars2:
+            ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
+                    f'${bar.get_height():.0f}M', ha='center', va='bottom', fontsize=7, fontweight='bold')
+
+    fig.suptitle('Stress Test: Individual vs Diversified Potential Losses\n(Dashed line = Margin Cushion before Margin Call)',
+                 fontsize=13, fontweight='bold', y=1.04)
+    plt.tight_layout()
+    filepath = OUTPUT_DIR / '11_stress_margin_comparison.png'
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"  Saved: {filepath}")
+
+
+def plot_diversification_benefit(margin_df):
+    """Create visualization showing diversification benefit across strategies."""
+    print("Creating diversification benefit visualization...")
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+    strategies = margin_df['Strategy'].values
+    x = np.arange(len(strategies))
+
+    # Chart 1: Diversification benefit percentage
+    ax1 = axes[0]
+    benefit = margin_df['Diversification_Benefit_Pct'].values
+    colors = ['#70AD47' if b > 5 else '#FFC000' if b > 0 else '#A5A5A5' for b in benefit]
+    bars = ax1.bar(x, benefit, color=colors, edgecolor='black')
+    ax1.set_ylabel('Diversification Benefit (%)')
+    ax1.set_title('Correlation-Based Margin Reduction\n(Higher = More Benefit from Firm-Wide Hedging)', fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(strategies, rotation=15, ha='right', fontsize=9)
+    ax1.axhline(y=0, color='black', linewidth=0.5)
+
+    for bar, val in zip(bars, benefit):
+        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.3,
+                f'{val:.1f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    # Chart 2: Margin call comparison at 3-sigma
+    ax2 = axes[1]
+    margin_call_3 = margin_df['Margin_Call_3std'] / 1e6
+    colors2 = ['#C00000' if mc > 0 else '#70AD47' for mc in margin_call_3]
+    bars2 = ax2.bar(x, margin_call_3, color=colors2, edgecolor='black')
+    ax2.set_ylabel('Margin Call Amount ($M)')
+    ax2.set_title('Potential Margin Call at 3σ Move (Diversified)\n(Red = Margin Call Required, Green = Within Cushion)', fontweight='bold')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(strategies, rotation=15, ha='right', fontsize=9)
+
+    for bar, val in zip(bars2, margin_call_3):
+        if val > 0:
+            ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
+                    f'${val:.0f}M', ha='center', va='bottom', fontsize=10, fontweight='bold')
+        else:
+            ax2.text(bar.get_x() + bar.get_width()/2., 0.5,
+                    'None', ha='center', va='bottom', fontsize=10, fontweight='bold', color='green')
+
+    fig.suptitle('Diversification Benefit: Why Firm-Wide Hedging Reduces Margin Risk',
+                 fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    filepath = OUTPUT_DIR / '12_diversification_benefit.png'
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"  Saved: {filepath}")
+
+
+def plot_margin_summary_table(margin_df):
+    """Create a formatted table visualization for margin analysis."""
+    print("Creating margin summary table...")
+
+    fig, ax = plt.subplots(figsize=(20, 6))
+    ax.axis('off')
+
+    # Prepare display data
+    table_data = []
+    for _, row in margin_df.iterrows():
+        table_data.append([
+            row['Strategy'],
+            f"${row['Notional']/1e6:.0f}M",
+            f"${row['Opening_Margin']/1e6:.0f}M",
+            f"${row['Maintenance_Margin']/1e6:.0f}M",
+            f"${row['Cushion']/1e6:.0f}M",
+            f"${row['Stress_1std_Individual']/1e6:.0f}M",
+            f"${row['Stress_1std_Diversified']/1e6:.0f}M",
+            f"${row['Stress_2std_Diversified']/1e6:.0f}M",
+            f"${row['Stress_3std_Diversified']/1e6:.0f}M",
+            f"{row['Diversification_Benefit_Pct']:.1f}%",
+            f"${row['Margin_Call_3std']/1e6:.0f}M" if row['Margin_Call_3std'] > 0 else "None",
+        ])
+
+    col_labels = ['Strategy', 'Notional', 'Opening\nMargin', 'Maint.\nMargin',
+                  'Cushion', '1σ Loss\n(Indiv.)', '1σ Loss\n(Divers.)',
+                  '2σ Loss\n(Divers.)', '3σ Loss\n(Divers.)',
+                  'Divers.\nBenefit', '3σ Margin\nCall']
+
+    table = ax.table(cellText=table_data,
+                     colLabels=col_labels,
+                     loc='center',
+                     cellLoc='center')
+
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.0, 1.9)
+
+    # Style header
+    for i in range(len(col_labels)):
+        table[(0, i)].set_facecolor('#4472C4')
+        table[(0, i)].set_text_props(color='white', fontweight='bold')
+
+    # Highlight recommended (Firm-Wide 3F) row
+    for _, row in margin_df.iterrows():
+        row_idx = _ + 1
+        if row['Strategy'] == 'Firm-Wide 3F':
+            for j in range(len(col_labels)):
+                table[(row_idx, j)].set_facecolor('#C6EFCE')
+
+    plt.title('Margin Analysis Summary: All Hedging Strategies\n'
+              '(Opening=15%, Maintenance=10%, Stress=Weekly σ of Futures Returns)',
+              fontsize=12, fontweight='bold', pad=20)
+
+    filepath = OUTPUT_DIR / '13_margin_summary_table.png'
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"  Saved: {filepath}")
+
+
+# =============================================================================
 # Main Execution
 # =============================================================================
 
@@ -1268,7 +1703,20 @@ def main():
     comparison_df = create_comparison_summary(single_reg_df, multi_results, firmwide_4f, firmwide_3f, firmwide_2f, total_values)
     plot_firmwide_summary(firmwide_3f, all_contracts_df)
     plot_firmwide_comparison(firmwide_4f, firmwide_3f, firmwide_2f, total_values)
-    
+
+    # =========================================================================
+    # PART 7: MARGIN ANALYSIS
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("PART 7: MARGIN ANALYSIS & STRESS TESTING")
+    print("=" * 70)
+
+    margin_df = calculate_margin_analysis(returns_df, all_contracts_df, df, total_values)
+    plot_margin_overview(margin_df)
+    plot_stress_margin_comparison(margin_df)
+    plot_diversification_benefit(margin_df)
+    plot_margin_summary_table(margin_df)
+
     # =========================================================================
     # FINAL SUMMARY
     # =========================================================================
@@ -1305,8 +1753,8 @@ def main():
     print(f"\nAll visualizations saved to: {OUTPUT_DIR}")
     
     return {
-        'df': df, 
-        'returns_df': returns_df, 
+        'df': df,
+        'returns_df': returns_df,
         'single_reg_df': single_reg_df,
         'four_factor_df': four_factor_df,
         'multi_results': multi_results,
@@ -1314,7 +1762,8 @@ def main():
         'firmwide_3f': firmwide_3f,
         'firmwide_2f': firmwide_2f,
         'all_contracts_df': all_contracts_df,
-        'total_values': total_values
+        'total_values': total_values,
+        'margin_df': margin_df
     }
 
 

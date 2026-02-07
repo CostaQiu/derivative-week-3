@@ -264,7 +264,112 @@ For comparison, we also evaluate a simpler 2-factor model using only S&P 500 and
 
 ---
 
-## 9. Conclusion & Recommendation
+## 9. Margin Analysis & Stress Testing
+
+### 9.1 Margin Parameters
+
+| Parameter            | Rate | Description                                |
+| -------------------- | ---- | ------------------------------------------ |
+| **Opening Margin**   | 15%  | Initial deposit required to open position  |
+| **Maintenance Margin** | 10% | Minimum balance before margin call triggered |
+| **Margin Cushion**   | 5%   | Buffer = Opening - Maintenance             |
+
+### 9.2 Weekly Futures Volatility
+
+The stress test uses the **weekly standard deviation** of each futures contract's returns:
+
+| Future   | Weekly σ | Annualized σ (approx.) |
+| -------- | -------- | ---------------------- |
+| S&P 500  | 2.96%    | ~21.3%                 |
+| FTSE EM  | 2.75%    | ~19.8%                 |
+| China 50 | 2.91%    | ~21.0%                 |
+| Nikkei   | 2.77%    | ~20.0%                 |
+
+### 9.3 Methodology
+
+**Individual Stress Loss** (per futures position):
+```
+Loss = N_contracts × Multiplier × Futures_Price × n × σ_weekly
+```
+Where n = 1, 2, or 3 standard deviations of unfavorable (upward) price movement against the short hedge.
+
+**Diversified Stress Loss** (accounting for correlations):
+```
+Combined_σ_dollar = sqrt(w' × Corr × w)
+```
+Where w is the vector of dollar volatilities per position (N × Multiplier × Price × σ), and Corr is the correlation matrix of futures returns. The diversified loss is then n × Combined_σ_dollar.
+
+**Margin Call** = max(0, Diversified Loss - Margin Cushion)
+
+### 9.4 Margin Overview
+
+![Margin Overview](visualizations/10_margin_overview.png)
+
+| Strategy       | Notional  | Opening Margin | Maint. Margin | Cushion |
+| -------------- | --------- | -------------- | ------------- | ------- |
+| Single-Future  | $934M     | $140M          | $93M          | $47M    |
+| Multi-Future   | $969M     | $145M          | $97M          | $48M    |
+| Firm-Wide 4F   | $1,053M   | $158M          | $105M         | $53M    |
+| **Firm-Wide 3F** | **$1,023M** | **$153M**   | **$102M**     | **$51M** |
+| Firm-Wide 2F   | $950M     | $143M          | $95M          | $48M    |
+
+### 9.5 Stress Test Results
+
+![Stress Margin Comparison](visualizations/11_stress_margin_comparison.png)
+
+#### Individual vs Diversified Stress Losses
+
+| Strategy       | 1σ (Indiv.) | 1σ (Divers.) | 2σ (Divers.) | 3σ (Divers.) | Divers. Benefit |
+| -------------- | ----------- | ------------ | ------------ | ------------ | --------------- |
+| Single-Future  | $27.0M      | $27.0M       | $54.0M       | $81.0M       | 0.0%            |
+| Multi-Future   | $27.8M      | $27.3M       | $54.7M       | $82.0M       | 1.8%            |
+| Firm-Wide 4F   | $30.0M      | $27.5M       | $55.0M       | $82.5M       | 8.3%            |
+| **Firm-Wide 3F** | **$29.2M** | **$26.9M** | **$53.7M**   | **$80.6M**   | **7.9%**        |
+| Firm-Wide 2F   | $27.5M     | $26.3M       | $52.6M       | $78.9M       | 4.2%            |
+
+**Key observations:**
+- **Single-Future gets zero diversification benefit** — each portfolio is hedged independently with one future, so there is no correlation offset
+- **Multi-Future gets minimal benefit (1.8%)** — only Europe and Pacific have 2 futures each, with correlated pairs
+- **Firm-Wide 3F gets significant benefit (7.9%)** — hedging at the company level means the S&P 500, FTSE EM, and Nikkei futures' imperfect correlations reduce combined risk
+- **Firm-Wide 4F gets the highest benefit (8.3%)** — 4 futures provide even more diversification, but includes the insignificant China50
+
+### 9.6 Margin Call Analysis
+
+| Strategy       | 1σ Call | 2σ Call | 3σ Call | Cushion |
+| -------------- | ------- | ------- | ------- | ------- |
+| Single-Future  | None    | $7.3M   | $34.3M  | $47M    |
+| Multi-Future   | None    | $6.2M   | $33.5M  | $48M    |
+| Firm-Wide 4F   | None    | $2.4M   | $29.9M  | $53M    |
+| **Firm-Wide 3F** | **None** | **$2.6M** | **$29.5M** | **$51M** |
+| Firm-Wide 2F   | None    | $5.1M   | $31.4M  | $48M    |
+
+- At **1σ**: No strategy triggers a margin call — the cushion absorbs the loss
+- At **2σ**: All strategies trigger margin calls, but firm-wide strategies require the smallest top-ups ($2-3M vs $6-7M)
+- At **3σ**: All strategies require significant margin calls ($29-34M), but firm-wide hedging keeps the call ~$5M lower than portfolio-level hedging
+
+### 9.7 Diversification Benefit
+
+![Diversification Benefit](visualizations/12_diversification_benefit.png)
+
+**Why does firm-wide hedging reduce margin risk?**
+
+When hedging at the portfolio level (Single-Future), each hedge is independent. If S&P 500 futures move unfavorably for the World portfolio, there is no offset from other positions.
+
+When hedging at the firm level (Firm-Wide 3F), the three futures (S&P 500, FTSE EM, Nikkei) have **imperfect correlations** (ρ ≈ 0.71-0.82). In any given week, it is unlikely that ALL three futures move to their worst-case simultaneously. The correlation matrix reduces the combined portfolio variance:
+
+```
+Var(combined) < Var(SP500) + Var(FTSE_EM) + Var(NIKKEI)
+```
+
+This means the firm needs **less margin capital** set aside for stress scenarios.
+
+### 9.8 Margin Summary Table
+
+![Margin Summary Table](visualizations/13_margin_summary_table.png)
+
+---
+
+## 10. Conclusion & Recommendation
 
 ### Recommended: **Firm-Wide 3-Factor Hedge**
 
@@ -296,14 +401,20 @@ For comparison, we also evaluate a simpler 2-factor model using only S&P 500 and
 
 ## Appendix: Files Generated
 
-| File                         | Description                      |
-| ---------------------------- | -------------------------------- |
-| `01_correlation_heatmap.png` | Index-futures correlation matrix |
-| `02_scatter_plots.png`       | Single-future regression plots   |
-| `05_four_factor_table.png`   | 4-factor regression results      |
-| `07_firmwide_summary.png`    | Firm-wide hedge summary          |
-| `09_strategy_comparison.png` | Strategy comparison chart        |
-| `all_contracts.csv`          | All contract calculations        |
+| File                              | Description                                     |
+| --------------------------------- | ----------------------------------------------- |
+| `01_correlation_heatmap.png`      | Index-futures correlation matrix                |
+| `02_scatter_plots.png`            | Single-future regression plots                  |
+| `05_four_factor_table.png`        | 4-factor regression results                     |
+| `07_firmwide_summary.png`         | Firm-wide hedge summary                         |
+| `08_firmwide_2factor_comparison.png` | 2F vs 3F vs 4F comparison                    |
+| `09_strategy_comparison.png`      | Strategy comparison chart                       |
+| `10_margin_overview.png`          | Opening vs maintenance margin by strategy       |
+| `11_stress_margin_comparison.png` | Individual vs diversified stress losses (1/2/3σ) |
+| `12_diversification_benefit.png`  | Diversification benefit & margin call comparison |
+| `13_margin_summary_table.png`     | Complete margin analysis summary table          |
+| `all_contracts.csv`               | All contract calculations                       |
+| `margin_analysis.csv`             | Margin analysis data for all strategies         |
 
 ---
 
